@@ -14,54 +14,47 @@ jobs:
         run: |
           dd if=/dev/zero of=large_file.bin bs=1M count=1024
 
-      - name: Get latest release
-        id: get_latest_release
+      - name: Create Release and Upload Assets
         uses: actions/github-script@v6
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
+            const fs = require('fs').promises;
+            
+            // Get latest release
             const releases = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            if (releases.data.length === 0) {
-              return {data: {tag_name: 'v0.0.0'}};
+            
+            // Determine new version
+            let newVersion = 'v1.0.0';
+            if (releases.data.length > 0) {
+              const latestVersion = releases.data[0].tag_name;
+              const versionParts = latestVersion.substring(1).split('.').map(Number);
+              versionParts[2]++;
+              newVersion = `v${versionParts.join('.')}`;
             }
-            return releases.data[0];
-
-      - name: Increment release version
-        id: increment_version
-        run: |
-          CURRENT_VERSION=${{ fromJson(steps.get_latest_release.outputs.result).tag_name }}
-          CURRENT_VERSION=${CURRENT_VERSION#v}
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          ((VERSION_PARTS[2]++))
-          NEW_VERSION="v${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.${VERSION_PARTS[2]}"
-          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.increment_version.outputs.NEW_VERSION }}
-          release_name: Release ${{ steps.increment_version.outputs.NEW_VERSION }}
-          draft: false
-          prerelease: false
-
-      - name: Upload Release Assets
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for i in {1..50}
-          do
-            asset_name="large_file_${i}.bin"
-            curl -X POST \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              -H "Content-Length: $(stat -c%s large_file.bin)" \
-              --data-binary @- \
-              "${{ steps.create_release.outputs.upload_url }}?name=$asset_name" \
-              < large_file.bin
-          done
+            
+            // Create new release
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: newVersion,
+              name: `Release ${newVersion}`,
+              draft: false,
+              prerelease: false
+            });
+            
+            // Upload assets
+            const fileContent = await fs.readFile('large_file.bin');
+            for (let i = 1; i <= 50; i++) {
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                name: `large_file_${i}.bin`,
+                data: fileContent
+              });
+              console.log(`Uploaded large_file_${i}.bin`);
+            }
