@@ -1,0 +1,61 @@
+name: Create Large Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Create 50GB file
+        run: |
+          dd if=/dev/zero of=large_file.bin bs=1M count=51200
+
+      - name: Get latest release
+        id: get_latest_release
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            if (releases.data.length === 0) {
+              return {data: {tag_name: 'v0.0.0'}};
+            }
+            return releases.data[0];
+
+      - name: Increment release version
+        id: increment_version
+        run: |
+          CURRENT_VERSION=${{ steps.get_latest_release.outputs.result.tag_name }}
+          CURRENT_VERSION=${CURRENT_VERSION#v}
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          ((VERSION_PARTS[2]++))
+          NEW_VERSION="v${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.${VERSION_PARTS[2]}"
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.increment_version.outputs.NEW_VERSION }}
+          release_name: Release ${{ steps.increment_version.outputs.NEW_VERSION }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./large_file.bin
+          asset_name: large_file.bin
+          asset_content_type: application/octet-stream
