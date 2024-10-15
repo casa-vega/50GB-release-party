@@ -60,6 +60,8 @@ jobs:
             curl -X POST \
               -H "Authorization: token $GITHUB_TOKEN" \
               -H "Content-Type: application/octet-stream" \
-              --data-binary @"large_file.bin" \
-              "${{ steps.create_release.outputs.upload_url }}?name=$asset_name"
+              -H "Content-Length: $(stat -c%s large_file.bin)" \
+              --data-binary @- \
+              "${{ steps.create_release.outputs.upload_url }}?name=$asset_name" \
+              < large_file.bin
           done
